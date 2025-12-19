@@ -5,7 +5,7 @@ const Group = require('../models/Group');
 const Notification = require('../models/Notification');
 const { sendGroupWelcomeEmail } = require('../utils/emailService');
 
-// 1. SEARCH USERS (Unchanged)
+// 1. SEARCH USERS
 router.get('/search', async (req, res) => {
   const { query } = req.query;
   if (!query) return res.json([]);
@@ -15,16 +15,20 @@ router.get('/search', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 2. CREATE GROUP (Now Invites Members instead of adding them directly)
+// 2. CREATE GROUP
 router.post('/create', async (req, res) => {
   const { name, memberIds, creatorId } = req.body;
   try {
     const creator = await User.findById(creatorId);
     
-    // Create group with ONLY the creator initially
-    const newGroup = await Group.create({ name, members: [creatorId], creator: creatorId });
+    // Create group - Creator is automatically a member
+    const newGroup = await Group.create({ 
+        name, 
+        members: [creatorId], // Creator joins immediately
+        creator: creatorId 
+    });
 
-    // Send In-App Invites to others
+    // Send Invites to others
     if (memberIds && memberIds.length > 0) {
       const notifications = memberIds.map(userId => ({
         recipient: userId,
@@ -36,21 +40,24 @@ router.post('/create', async (req, res) => {
       }));
       await Notification.insertMany(notifications);
     }
-    res.status(201).json({ group: newGroup, message: "Group created & invites sent!" });
+    res.status(201).json({ group: newGroup, message: "Group created!" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 3. GET USER GROUPS (Unchanged)
+// 3. GET USER GROUPS
 router.get('/user/:userId', async (req, res) => {
   try {
-    const groups = await Group.find({ members: req.params.userId }).populate('members', 'username email');
+    // Find all groups where the user is in the members array
+    const groups = await Group.find({ members: req.params.userId })
+        .populate('members', 'username email')
+        .sort({ createdAt: -1 });
     res.json(groups);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 4. GET NOTIFICATIONS (Unchanged)
+// 4. GET NOTIFICATIONS
 router.get('/notifications/:userId', async (req, res) => {
   try {
     const notifs = await Notification.find({ 
@@ -64,9 +71,9 @@ router.get('/notifications/:userId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 5. RESPOND TO NOTIFICATION (Accept Logic Updated)
+// 5. RESPOND TO NOTIFICATION
 router.post('/notifications/respond', async (req, res) => {
-  const { notificationId, response } = req.body; // response = 'ACCEPTED' or 'REJECTED'
+  const { notificationId, response } = req.body; // 'ACCEPTED' or 'REJECTED'
   try {
     const notif = await Notification.findById(notificationId).populate('group');
     if (!notif) return res.status(404).json({ error: "Not found" });
@@ -82,10 +89,10 @@ router.post('/notifications/respond', async (req, res) => {
     await notif.save();
 
     if (response === 'ACCEPTED') {
-      // 1. Add User to Group
+      // Add User to Group
       await Group.findByIdAndUpdate(notif.group._id, { $addToSet: { members: notif.recipient } });
       
-      // 2. Send "Welcome" Email
+      // Send Welcome Email
       const user = await User.findById(notif.recipient);
       if (user) {
           sendGroupWelcomeEmail(user.email, user.username, notif.group.name)
@@ -99,7 +106,7 @@ router.post('/notifications/respond', async (req, res) => {
   }
 });
 
-// 6. INVITE MEMBER (Add Button Logic)
+// 6. INVITE MEMBER
 router.put('/add-member', async (req, res) => {
   const { groupId, memberId, adminId } = req.body;
   try {
@@ -108,7 +115,6 @@ router.put('/add-member', async (req, res) => {
 
     if (group.members.includes(memberId)) return res.status(400).json({ error: "User already in group" });
 
-    // Create Notification
     await Notification.create({
         recipient: memberId,
         sender: adminId,
@@ -124,7 +130,7 @@ router.put('/add-member', async (req, res) => {
   }
 });
 
-// 7. REMOVE MEMBER (Unchanged)
+// 7. REMOVE MEMBER
 router.put('/remove-member', async (req, res) => {
   const { groupId, memberId } = req.body;
   try {
@@ -136,7 +142,7 @@ router.put('/remove-member', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 8. CREATE MANUAL NOTIFICATION (For Expenses)
+// 8. CREATE MANUAL NOTIFICATION
 router.post('/notifications/create', async (req, res) => {
     try {
       const { userId, message, type, senderId } = req.body;

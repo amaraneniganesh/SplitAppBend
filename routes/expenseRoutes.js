@@ -5,13 +5,13 @@ const {
   addExpense, 
   getGroupExpenses, 
   settleDebt,
-  getUserTransactionHistory // <--- Import the new function
+  getUserTransactionHistory 
 } = require('../controllers/expenseController');
 
 router.get('/balance/:userId', getUserBalance);
 router.post('/add', addExpense);
 router.get('/group/:groupId', getGroupExpenses);
 router.post('/settle', settleDebt);
-router.get('/history/:userId', getUserTransactionHistory); // <--- Add this route
+router.get('/history/:userId', getUserTransactionHistory);
 
 module.exports = router;
