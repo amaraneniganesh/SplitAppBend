@@ -142,7 +142,7 @@ router.put('/remove-member', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 8. CREATE MANUAL NOTIFICATION
+// 8. CREATE MANUAL NOTIFICATION?
 router.post('/notifications/create', async (req, res) => {
     try {
       const { userId, message, type, senderId } = req.body;
