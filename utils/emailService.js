@@ -1,15 +1,25 @@
 const nodemailer = require('nodemailer');
 
-// 1. SETUP TRANSPORTER
+// ==========================================
+// 1. TRANSPORTER CONFIGURATION
+// ==========================================
+// This configuration works locally and is standard for Render.
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // Simplest way to connect to Gmail
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Must be false for port 587
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    rejectUnauthorized: false // Helps prevent SSL errors on cloud servers
   }
 });
 
+// ==========================================
 // 2. MODERN UI TEMPLATE (Fixed with Tables)
+// ==========================================
 const getBaseTemplate = (previewText, bodyContent) => `
 <!DOCTYPE html>
 <html>
@@ -64,7 +74,11 @@ const getBaseTemplate = (previewText, bodyContent) => `
 </html>
 `;
 
-// 3. SEND OTP EMAIL
+// ==========================================
+// 3. EXPORT FUNCTIONS
+// ==========================================
+
+// --- Send OTP ---
 exports.sendOTPEmail = async (email, otp, username) => {
   const content = `
     <h1>Verify your email</h1>
@@ -72,10 +86,15 @@ exports.sendOTPEmail = async (email, otp, username) => {
     <div class="otp-code">${otp}</div>
     <p style="font-size: 12px; color: #888; margin-top: 0;">This code expires in 10 minutes.</p>
   `;
-  await transporter.sendMail({ from: '"SplitApp" <no-reply@splitapp.com>', to: email, subject: `Your code is ${otp}`, html: getBaseTemplate('Verify Email', content) });
+  await transporter.sendMail({ 
+    from: '"SplitApp" <no-reply@splitapp.com>', 
+    to: email, 
+    subject: `Your code is ${otp}`, 
+    html: getBaseTemplate('Verify Email', content) 
+  });
 };
 
-// 4. SEND TRANSACTION ALERTS (Fixed Spacing)
+// --- Send Transaction Alerts ---
 exports.sendTransactionEmail = async (email, username, type, data) => {
   let content = '';
   const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -143,10 +162,15 @@ exports.sendTransactionEmail = async (email, username, type, data) => {
     `;
   }
 
-  await transporter.sendMail({ from: '"SplitApp Wallet" <no-reply@splitapp.com>', to: email, subject: 'Transaction Alert', html: getBaseTemplate('Transaction', content) });
+  await transporter.sendMail({ 
+    from: '"SplitApp Wallet" <no-reply@splitapp.com>', 
+    to: email, 
+    subject: 'Transaction Alert', 
+    html: getBaseTemplate('Transaction', content) 
+  });
 };
 
-// 5. SEND WELCOME EMAIL (Fixed Spacing)
+// --- Send Welcome Email ---
 exports.sendGroupWelcomeEmail = async (email, username, groupName) => {
   const content = `
     <h1>Welcome Aboard! 🚀</h1>
@@ -160,5 +184,10 @@ exports.sendGroupWelcomeEmail = async (email, username, groupName) => {
     <p style="font-size: 14px; margin-top: 24px;">You can now add expenses and track balances.</p>
     <a href="#" class="btn">Go to Group</a>
   `;
-  await transporter.sendMail({ from: '"SplitApp Teams" <no-reply@splitapp.com>', to: email, subject: `You joined ${groupName}`, html: getBaseTemplate('Welcome', content) });
+  await transporter.sendMail({ 
+    from: '"SplitApp Teams" <no-reply@splitapp.com>', 
+    to: email, 
+    subject: `You joined ${groupName}`, 
+    html: getBaseTemplate('Welcome', content) 
+  });
 };
