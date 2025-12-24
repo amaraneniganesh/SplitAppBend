@@ -1,6 +1,7 @@
 const Expense = require('../models/Expense');
 const User = require('../models/User');
 const Group = require('../models/Group');
+const Notification = require('../models/Notification'); // <--- IMPORT THIS
 const { sendTransactionEmail } = require('../utils/emailService');
 
 // ============================================================
@@ -10,7 +11,6 @@ exports.addExpense = async (req, res) => {
   try {
     const { description, amount, payer, group, splitType, splitData } = req.body;
 
-    // Validate Group
     if (!group) return res.status(400).json({ error: "Group ID is required" });
 
     const formattedSplits = splitData.map(split => ({
@@ -28,12 +28,12 @@ exports.addExpense = async (req, res) => {
       splits: formattedSplits
     });
 
-    // --- EMAIL LOGIC ---
+    // --- NOTIFICATION & EMAIL LOGIC (IMMEDIATE) ---
     try {
         const payerUser = await User.findById(payer);
         const groupDetails = await Group.findById(group);
 
-        // 1. Email Payer
+        // 1. Email Payer (Confirmation)
         if (payerUser) {
             sendTransactionEmail(payerUser.email, payerUser.username, 'PAID', {
                 groupName: groupDetails.name,
@@ -42,24 +42,41 @@ exports.addExpense = async (req, res) => {
             }).catch(err => console.error("Email error:", err));
         }
 
-        // 2. Email Debtors
-        const debtorPromises = splitData.map(async (split) => {
+        // 2. Process Debtors (Email + Website Notification)
+        const notificationPromises = [];
+        
+        splitData.forEach(split => {
             if (split.userId !== payer) {
-                const debtor = await User.findById(split.userId);
-                if (debtor) {
-                    return sendTransactionEmail(debtor.email, debtor.username, 'OWE', {
-                        groupName: groupDetails.name,
-                        payerName: payerUser.username,
-                        description,
-                        amount: split.amount.toFixed(2)
-                    });
-                }
+                // A. Send Email Asynchronously
+                User.findById(split.userId).then(debtor => {
+                    if (debtor) {
+                        sendTransactionEmail(debtor.email, debtor.username, 'OWE', {
+                            groupName: groupDetails.name,
+                            payerName: payerUser.username,
+                            description,
+                            amount: split.amount.toFixed(2)
+                        }).catch(e => console.log(e));
+                    }
+                });
+
+                // B. Create Database Notification (For Website Inbox)
+                notificationPromises.push({
+                    recipient: split.userId,
+                    sender: payer,
+                    type: 'EXPENSE_ADDED', // New Type
+                    group: group,
+                    message: `${payerUser.username} added "${description}" in ${groupDetails.name}`,
+                    status: 'unread' // Just meant to be seen
+                });
             }
         });
         
-        Promise.allSettled(debtorPromises).catch(err => console.error("Email error:", err));
-    } catch (emailErr) {
-        console.warn("Email service skipped:", emailErr.message);
+        if (notificationPromises.length > 0) {
+            await Notification.insertMany(notificationPromises);
+        }
+
+    } catch (notifErr) {
+        console.warn("Notification/Email service warning:", notifErr.message);
     }
     // -------------------
 
@@ -71,18 +88,16 @@ exports.addExpense = async (req, res) => {
 };
 
 // ============================================================
-// 2. SETTLE DEBT (Fixed to prevent cross-group leaking)
+// 2. SETTLE DEBT
 // ============================================================
 exports.settleDebt = async (req, res) => {
   try {
     const { payer, receiver, amount, group } = req.body;
     
-    // VALIDATION: Ensure settlement happens inside a valid group
     if (!group) return res.status(400).json({ error: "Settlement must belong to a group" });
 
     const formattedSplits = [{ user: receiver, amount: amount }];
 
-    // Create the Settlement Transaction strictly in this group
     const settlement = await Expense.create({
       description: "Settlement",
       amount, 
@@ -90,26 +105,36 @@ exports.settleDebt = async (req, res) => {
       group, 
       splitType: 'EXACT', 
       splits: formattedSplits,
-      isSettled: true // Mark as a settlement transaction
+      isSettled: true 
     });
 
-    // --- EMAIL LOGIC ---
+    // --- NOTIFICATION & EMAIL LOGIC (IMMEDIATE) ---
     try {
         const payerUser = await User.findById(payer);
         const receiverUser = await User.findById(receiver);
+        const groupDetails = await Group.findById(group);
 
         if (receiverUser && payerUser) {
-            // Notify Receiver
+            // 1. Email Logic
             sendTransactionEmail(receiverUser.email, receiverUser.username, 'SETTLEMENT_RECEIVED', {
                 payerName: payerUser.username,
                 amount
             }).catch(e => console.log(e));
 
-            // Notify Payer
             sendTransactionEmail(payerUser.email, payerUser.username, 'SETTLEMENT_SENT', {
                 receiverName: receiverUser.username,
                 amount
             }).catch(e => console.log(e));
+
+            // 2. Database Notification for Receiver (Website Inbox)
+            await Notification.create({
+                recipient: receiver,
+                sender: payer,
+                type: 'SETTLEMENT', // New Type
+                group: group,
+                message: `${payerUser.username} settled ₹${amount} with you in ${groupDetails.name}`,
+                status: 'unread'
+            });
         }
     } catch (e) {
         console.warn("Email warning:", e.message);
@@ -121,6 +146,7 @@ exports.settleDebt = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ... rest of the file stays the same
 
 // ============================================================
 // 3. GET USER BALANCE (Global Calculation)

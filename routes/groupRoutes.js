@@ -71,36 +71,49 @@ router.get('/notifications/:userId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 5. RESPOND TO NOTIFICATION
+// ... existing imports
+
+// 5. RESPOND TO NOTIFICATION (Updated)
 router.post('/notifications/respond', async (req, res) => {
-  const { notificationId, response } = req.body; // 'ACCEPTED' or 'REJECTED'
+  const { notificationId, response } = req.body; // response: 'ACCEPTED', 'REJECTED', or 'READ'
   try {
     const notif = await Notification.findById(notificationId).populate('group');
     if (!notif) return res.status(404).json({ error: "Not found" });
 
-    // Handle Info Notifications (Just delete)
+    // IF IT IS AN INFO NOTIFICATION (Expense or Settlement), JUST DELETE IT
     if (notif.type !== 'GROUP_INVITE') {
         await Notification.findByIdAndDelete(notificationId);
-        return res.json({ message: "Cleared" });
+        return res.json({ message: "Notification cleared" });
     }
 
-    // Handle Group Invites
-    notif.status = response;
-    await notif.save();
+    // --- LOGIC ONLY FOR GROUP INVITES BELOW ---
 
+    // Handle Reject
+    if (response === 'REJECTED') {
+        await Notification.findByIdAndDelete(notificationId);
+        return res.json({ message: "Invite rejected" });
+    }
+
+    // Handle Accept
     if (response === 'ACCEPTED') {
       // Add User to Group
       await Group.findByIdAndUpdate(notif.group._id, { $addToSet: { members: notif.recipient } });
       
+      // Update Notif status or delete it
+      notif.status = 'ACCEPTED';
+      await notif.save();
+      // Optionally delete it after accepting to clear inbox:
+      // await Notification.findByIdAndDelete(notificationId);
+
       // Send Welcome Email
       const user = await User.findById(notif.recipient);
       if (user) {
           sendGroupWelcomeEmail(user.email, user.username, notif.group.name)
             .catch(err => console.error("Welcome Email Error:", err));
       }
+      return res.json({ message: "Group joined successfully" });
     }
 
-    res.json({ message: `Invite ${response}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
